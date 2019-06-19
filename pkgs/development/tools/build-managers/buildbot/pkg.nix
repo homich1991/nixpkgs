@@ -1,4 +1,4 @@
-{ lib, buildPythonPackage, fetchPypi, setuptools }:
+{ stdenv, buildPythonPackage, fetchPypi, setuptools }:
 
 buildPythonPackage rec {
   pname = "buildbot-pkg";
@@ -15,7 +15,7 @@ buildPythonPackage rec {
     substituteInPlace buildbot_pkg.py --replace "os.listdir = listdir" ""
   '';
 
-  meta = with lib; {
+  meta = with stdenv.lib; {
     homepage = http://buildbot.net/;
     description = "Buildbot Packaging Helper";
     maintainers = with maintainers; [ nand0p ryansydnor ];

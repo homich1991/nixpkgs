@@ -7,40 +7,6 @@ with lib;
 let
   cfg = config.services.buildbot-worker;
 
-  python = cfg.package.pythonModule;
-
-  tacFile = pkgs.writeText "aur-buildbot-worker.tac" ''
-    import os
-    from io import open
-
-    from buildbot_worker.bot import Worker
-    from twisted.application import service
-
-    basedir = '${cfg.buildbotDir}'
-
-    # note: this line is matched against to check that this is a worker
-    # directory; do not edit it.
-    application = service.Application('buildbot-worker')
-
-    master_url_split = '${cfg.masterUrl}'.split(':')
-    buildmaster_host = master_url_split[0]
-    port = int(master_url_split[1])
-    workername = '${cfg.workerUser}'
-
-    with open('${cfg.workerPassFile}', 'r', encoding='utf-8') as passwd_file:
-        passwd = passwd_file.read().strip('\r\n')
-    keepalive = 600
-    umask = None
-    maxdelay = 300
-    numcpus = None
-    allow_shutdown = None
-
-    s = Worker(buildmaster_host, port, workername, passwd, basedir,
-               keepalive, umask=umask, maxdelay=maxdelay,
-               numcpus=numcpus, allow_shutdown=allow_shutdown)
-    s.setServiceParent(application)
-  '';
-
 in {
   options = {
     services.buildbot-worker = {
@@ -93,23 +59,6 @@ in {
         description = "Specifies the Buildbot Worker password.";
       };
 
-      workerPassFile = mkOption {
-        type = types.path;
-        description = "File used to store the Buildbot Worker password";
-      };
-
-      hostMessage = mkOption {
-        default = null;
-        type = types.nullOr types.str;
-        description = "Description of this worker";
-      };
-
-      adminMessage = mkOption {
-        default = null;
-        type = types.nullOr types.str;
-        description = "Name of the administrator of this worker";
-      };
-
       masterUrl = mkOption {
         default = "localhost:9989";
         type = types.str;
@@ -118,24 +67,23 @@ in {
 
       package = mkOption {
         type = types.package;
-        default = pkgs.pythonPackages.buildbot-worker;
-        defaultText = "pkgs.pythonPackages.buildbot-worker";
+        default = pkgs.buildbot-worker;
+        defaultText = "pkgs.buildbot-worker";
         description = "Package to use for buildbot worker.";
-        example = literalExample "pkgs.python3Packages.buildbot-worker";
+        example = literalExample "pkgs.buildbot-worker";
       };
 
       packages = mkOption {
-        default = with pkgs; [ git ];
+        default = with pkgs; [ python27Packages.twisted git ];
         example = literalExample "[ pkgs.git ]";
         type = types.listOf types.package;
         description = "Packages to add to PATH for the buildbot process.";
       };
+
     };
   };
 
   config = mkIf cfg.enable {
-    services.buildbot-worker.workerPassFile = mkDefault (pkgs.writeText "buildbot-worker-password" cfg.workerPass);
-
     users.groups = optional (cfg.group == "bbworker") {
       name = "bbworker";
     };
@@ -156,16 +104,11 @@ in {
       after = [ "network.target" "buildbot-master.service" ];
       wantedBy = [ "multi-user.target" ];
       path = cfg.packages;
-      environment.PYTHONPATH = "${python.withPackages (p: [ cfg.package ])}/${python.sitePackages}";
 
       preStart = ''
-        mkdir -vp "${cfg.buildbotDir}/info"
-        ${optionalString (cfg.hostMessage != null) ''
-          ln -sf "${pkgs.writeText "buildbot-worker-host" cfg.hostMessage}" "${cfg.buildbotDir}/info/host"
-        ''}
-        ${optionalString (cfg.adminMessage != null) ''
-          ln -sf "${pkgs.writeText "buildbot-worker-admin" cfg.adminMessage}" "${cfg.buildbotDir}/info/admin"
-        ''}
+        mkdir -vp ${cfg.buildbotDir}
+        rm -fv $cfg.buildbotDir}/buildbot.tac
+        ${cfg.package}/bin/buildbot-worker create-worker ${cfg.buildbotDir} ${cfg.masterUrl} ${cfg.workerUser} ${cfg.workerPass}
       '';
 
       serviceConfig = {
@@ -173,9 +116,11 @@ in {
         User = cfg.user;
         Group = cfg.group;
         WorkingDirectory = cfg.home;
+        Environment = "PYTHONPATH=${cfg.package}/lib/python2.7/site-packages:${pkgs.python27Packages.future}/lib/python2.7/site-packages";
 
         # NOTE: call twistd directly with stdout logging for systemd
-        ExecStart = "${python.pkgs.twisted}/bin/twistd --nodaemon --pidfile= --logfile - --python ${tacFile}";
+        #ExecStart = "${cfg.package}/bin/buildbot-worker start --nodaemon ${cfg.buildbotDir}";
+        ExecStart = "${pkgs.python27Packages.twisted}/bin/twistd -n -l - -y ${cfg.buildbotDir}/buildbot.tac";
       };
 
     };
